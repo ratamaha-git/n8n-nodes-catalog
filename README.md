@@ -35,7 +35,7 @@ The workflow:
 4. If unchanged: skips the upload.
 5. On failure: emails the maintainer via SMTP.
 
-Required GitHub secrets: `HF_TOKEN`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `NOTIFY_EMAIL`.
+Required GitHub secrets: `HF_TOKEN`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`. Failure alerts are sent to `SMTP_USER` (the same mailbox the workflow authenticates as).
 
 ## License
 
