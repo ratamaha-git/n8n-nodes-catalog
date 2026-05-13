@@ -33,9 +33,9 @@ The workflow:
 2. Hashes the new `nodes.json` and compares it with the HF-hosted copy.
 3. If changed: bumps the `Last updated` line in `dataset-card.md`, uploads `nodes.json` + `nodes.parquet` + `dataset-card.md` (as `README.md`) to HF.
 4. If unchanged: skips the upload.
-5. On failure: emails `a@1n.ax` via SMTP.
+5. On failure: emails the maintainer via SMTP.
 
-Required GitHub secrets: `HF_TOKEN`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`.
+Required GitHub secrets: `HF_TOKEN`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `NOTIFY_EMAIL`.
 
 ## License
 

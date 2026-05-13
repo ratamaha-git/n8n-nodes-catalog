@@ -148,7 +148,7 @@ jobs:
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASS }}
           subject: "[n8n-nodes-catalog] monthly update FAILED — ${{ github.run_id }}"
-          to: a@1n.ax
+          to: ${{ secrets.NOTIFY_EMAIL }}
           from: ${{ secrets.SMTP_USER }}
           body: |
             The monthly n8n nodes catalog update workflow failed.
