@@ -1,0 +1,165 @@
+name: n8n nodes catalog monthly update
+
+on:
+  schedule:
+    # 1st of each month, 09:00 UTC
+    - cron: "0 9 1 * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "n8n release tag (leave blank for latest)"
+        required: false
+        default: ""
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pyarrow huggingface_hub
+
+      - name: Run extraction
+        id: extract
+        env:
+          N8N_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ -n "$N8N_TAG" ]; then
+            python extract.py --tag "$N8N_TAG"
+          else
+            python extract.py
+          fi
+
+      - name: Check for data changes
+        id: diff
+        run: |
+          NEW_HASH=$(sha256sum nodes.json | cut -d' ' -f1)
+          echo "new_hash=$NEW_HASH" >> "$GITHUB_OUTPUT"
+
+          if python - <<'PY'
+          import sys
+          try:
+              from huggingface_hub import hf_hub_download
+              import os, hashlib
+              path = hf_hub_download(
+                  repo_id="automatelab/n8n-nodes-catalog",
+                  filename="nodes.json",
+                  repo_type="dataset",
+                  token=os.environ.get("HF_TOKEN"),
+                  local_dir="/tmp/hf_prev",
+              )
+              h = hashlib.sha256(open(path, "rb").read()).hexdigest()
+              print(h)
+              sys.exit(0)
+          except Exception as e:
+              print(f"download failed: {e}", file=sys.stderr)
+              sys.exit(1)
+          PY
+          then
+            PREV_HASH=$(python - <<'PY'
+          import sys
+          try:
+              from huggingface_hub import hf_hub_download
+              import os, hashlib
+              path = hf_hub_download(
+                  repo_id="automatelab/n8n-nodes-catalog",
+                  filename="nodes.json",
+                  repo_type="dataset",
+                  token=os.environ.get("HF_TOKEN"),
+                  local_dir="/tmp/hf_prev2",
+              )
+              print(hashlib.sha256(open(path,"rb").read()).hexdigest())
+          except:
+              print("none")
+          PY
+            )
+            echo "prev_hash=$PREV_HASH" >> "$GITHUB_OUTPUT"
+            if [ "$NEW_HASH" = "$PREV_HASH" ]; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "prev_hash=none" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+      - name: Update dataset card Last Updated timestamp
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          MONTH=$(date -u +%Y-%m)
+          sed -i "s/Last updated: [0-9][0-9][0-9][0-9]-[0-9][0-9]\./Last updated: $MONTH./" dataset-card.md
+          echo "Updated dataset-card.md timestamp to $MONTH"
+
+      - name: Upload to HuggingFace
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          repo_id = "automatelab/n8n-nodes-catalog"
+
+          uploads = [
+              ("nodes.json", "nodes.json"),
+              ("nodes.parquet", "nodes.parquet"),
+              ("dataset-card.md", "README.md"),
+          ]
+          for src, dst in uploads:
+              api.upload_file(
+                  path_or_fileobj=src,
+                  path_in_repo=dst,
+                  repo_id=repo_id,
+                  repo_type="dataset",
+                  commit_message=f"monthly update: {dst}",
+              )
+              print(f"uploaded: {src} -> {dst}")
+          print("done")
+          PY
+
+      - name: No changes — skip upload
+        if: steps.diff.outputs.changed == 'false'
+        run: |
+          echo "nodes.json hash unchanged vs HuggingFace — skipping upload."
+          echo "prev=${{ steps.diff.outputs.prev_hash }}"
+          echo "new=${{ steps.diff.outputs.new_hash }}"
+
+      - name: Send failure email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "[n8n-nodes-catalog] monthly update FAILED — ${{ github.run_id }}"
+          to: a@1n.ax
+          from: ${{ secrets.SMTP_USER }}
+          body: |
+            The monthly n8n nodes catalog update workflow failed.
+
+            Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Triggered by: ${{ github.event_name }}
+            Ref: ${{ github.ref }}
+
+            Check the run log above for the exact error. Common causes:
+            - HF_TOKEN secret missing or expired
+            - extraction script error (upstream n8n repo changed layout)
+            - HuggingFace API error
+
+            Fix and re-trigger manually via workflow_dispatch or wait for next month.
